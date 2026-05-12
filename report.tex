@@ -21,7 +21,11 @@
 \usepackage{amsmath}
 \usepackage{booktabs}
 \usepackage{caption}
+\usepackage{subcaption}
 \usepackage{float}
+
+% Show \paragraph headings (test cases) in the table of contents
+\setcounter{tocdepth}{4}
 
 % ── Colours ──────────────────────────────────────────────
 \definecolor{codegreen}{rgb}{0.25,0.49,0.37}
@@ -86,7 +90,7 @@
 {\large\textbf{Ain Shams University}}\\[0.3cm]
 {\large Faculty of Engineering}\\[0.1cm]
 {\large Computer and Systems Engineering Department}\\[0.1cm]
-{\large CHEP -- Spring 2026}\\[1.5cm]
+{\large ICHEP -- Spring 2026}\\[1.5cm]
 \HRule\\[0.6cm]
 {\Huge\bfseries Secure Communication Suite}\\[0.3cm]
 {\Large A Cryptography Application in Python}\\[0.4cm]
@@ -667,12 +671,14 @@ class SecureServer:
         except Exception as e:
             print(f"[-] Error handling {addr}: {e}")
         finally:
-            username = self.clients.get(conn, "Unknown")
+            username = self.clients.get(conn)
             self.clients.pop(conn, None)
             self.broadcast_ciphers.pop(conn, None)
             conn.close()
-            self.broadcast(
-                f"[SERVER] {username} left.".encode(), None)
+            if username:
+                self.broadcast(
+                    f"[SERVER] {username} left.".encode(),
+                    None)
 
 if __name__ == '__main__':
     server = SecureServer()
@@ -796,9 +802,10 @@ The GUI is built using \textbf{CustomTkinter}, a modern Python UI library that e
     \item \textbf{Authentication Screen:} A centred login card with username/password fields and Login/Register buttons.
     \item \textbf{Main Interface:} A sidebar-based layout with:
     \begin{itemize}
-        \item \textbf{Secure Chat} – real-time encrypted messaging with a text display, message entry, and send button.
-        \item \textbf{Data Integrity (Crypto Tools)} – an SHA-256 hasher and a standalone AES encrypt/decrypt tool.
-        \item \textbf{Disconnect} – graceful session teardown.
+        \item \textbf{Secure Chat} -- real-time encrypted messaging with chat bubbles (sent messages right-aligned in blue, received messages left-aligned in slate).
+        \item \textbf{Crypto Tools} -- an SHA-256 integrity verifier and a standalone AES encrypt/decrypt tool.
+        \item \textbf{Security Dashboard} -- a real-time visualization of all cryptographic operations (see Section~\ref{sec:dashboard}).
+        \item \textbf{Disconnect} -- graceful session teardown.
     \end{itemize}
 \end{enumerate}
 
@@ -865,6 +872,86 @@ if __name__ == "__main__":
 \end{lstlisting}
 
 % -----------------------------------------------------------
+\subsection{Security Visualization Dashboard}
+\label{sec:dashboard}
+% -----------------------------------------------------------
+
+A key challenge in security-focused applications is that cryptographic operations are invisible to the end user. To address this, we implemented a \textbf{Security Visualization Dashboard} -- a real-time monitoring system that makes every cryptographic operation observable.
+
+\subsubsection{Architecture: The SecurityLogger Event Bus}
+
+The dashboard is powered by a singleton \texttt{SecurityLogger} class (\texttt{security\_logger.py}) that acts as a central event bus. Every cryptographic module publishes structured \texttt{SecurityEvent} objects to this bus, and the GUI subscribes to render them.
+
+\begin{lstlisting}[caption={SecurityLogger -- Event Bus (excerpt)}]
+class SecurityEvent:
+    def __init__(self, event_type, module, description,
+                 raw_data="", details=None):
+        self.timestamp = time.time()
+        self.event_type = event_type    # e.g. "AES-ENC"
+        self.module = module            # e.g. "Block Cipher"
+        self.description = description  # Human-readable
+        self.raw_data = raw_data        # Hex data
+        self.details = details or {}    # Structured k-v pairs
+
+class SecurityLogger:       # Singleton
+    def log(self, event): ...
+    def log_handshake(self, step_num, title, desc): ...
+    def set_session_info(self, key, value): ...
+    def subscribe(self, callback): ...
+\end{lstlisting}
+
+\subsubsection{Event Types Emitted by Each Module}
+
+\begin{table}[H]
+\centering
+\caption{Security events emitted by each module}
+\begin{tabular}{@{}llp{6.5cm}@{}}
+\toprule
+\textbf{Module} & \textbf{Event Type} & \textbf{Details Captured} \\
+\midrule
+AESCipher    & \texttt{AES-ENC}  & Nonce, tag, ciphertext (hex), sizes, wire format \\
+             & \texttt{AES-DEC}  & Tag verification status, plaintext size \\
+\addlinespace
+RSACipher    & \texttt{RSA-ENC}  & OAEP padding, key fingerprint, I/O sizes \\
+             & \texttt{RSA-DEC}  & Input/output sizes \\
+             & \texttt{RSA-KEYGEN} & Key fingerprint, key sizes \\
+\addlinespace
+DeepHash     & \texttt{SHA-256}  & Input size, full 256-bit digest \\
+             & \texttt{SHA-256-VERIFY} & Expected vs computed, match result \\
+\addlinespace
+AuthManager  & \texttt{AUTH-LOGIN}     & Salt, hash comparison, pass/fail \\
+             & \texttt{AUTH-REGISTER}  & Salt generated, hash stored \\
+             & \texttt{AUTH-FAIL}      & Reason for failure \\
+\addlinespace
+KeyManager   & \texttt{KEY-GEN}   & Key fingerprint, file paths \\
+             & \texttt{KEY-LOAD}  & Key fingerprint, file paths \\
+             & \texttt{KEY-SAVE}  & Partner ID, fingerprint \\
+\addlinespace
+Client       & \texttt{HANDSHAKE} & 4-step protocol details \\
+             & \texttt{SESSION-READY} & Cipher suite, masked session key \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Dashboard Tabs}
+
+The Security Dashboard is accessible via the sidebar and contains three tabs:
+
+\begin{enumerate}
+    \item \textbf{Handshake Tab:} Displays the 4-step secure handshake protocol as visual cards:
+    \begin{itemize}
+        \item Step 1: Authentication Pulse (action, username, protocol)
+        \item Step 2: RSA Public Key Received (key size, fingerprint)
+        \item Step 3: AES Session Key Generated (key hex, source: OS CSPRNG)
+        \item Step 4: Encrypted Key Exchange (RSA-OAEP ciphertext size)
+    \end{itemize}
+
+    \item \textbf{Session Info Tab:} Shows the active cipher suite banner (\texttt{AES-128-EAX + RSA-2048-OAEP + SHA-256}), the partially masked AES session key, server key fingerprint, and connection details.
+
+    \item \textbf{Crypto Log Tab:} A colour-coded, scrollable log of every cryptographic event with expandable details (nonces, tags, hashes, key fingerprints). Events are colour-coded by type (green for encryption, blue for decryption, yellow for handshake, red for failures).
+\end{enumerate}
+
+% -----------------------------------------------------------
 \subsection{How the Suite Secures Internet Services}
 % -----------------------------------------------------------
 
@@ -872,21 +959,23 @@ The Secure Communication Suite applies its cryptographic modules to provide defe
 
 \begin{enumerate}
     \item \textbf{Data in Transit:} All messages exchanged between client and server are encrypted using AES-EAX with per-session keys. This prevents eavesdropping (confidentiality) and detects any modification of packets (integrity).
-    
+
     \item \textbf{Key Exchange Security:} The AES session key is never transmitted in plaintext. It is encrypted with the server's RSA-2048 public key, ensuring that only the legitimate server can recover it.
-    
+
     \item \textbf{Data at Rest:} User credentials are stored as salted SHA-256 hashes, protecting them even if the database file is exfiltrated. RSA private keys are stored on disk in PEM format, with access controlled by file-system permissions.
-    
+
     \item \textbf{Authentication:} Users must register and log in before accessing any service. The server rejects duplicate sessions, preventing impersonation or session hijacking.
-    
+
     \item \textbf{Per-Client Isolation:} Each client has its own AES session key and cipher instance. A compromise of one client's key does not affect other clients' sessions.
+
+    \item \textbf{Transparency via Dashboard:} The Security Dashboard provides full visibility into every cryptographic operation, enabling users and auditors to verify that security mechanisms are functioning correctly in real-time.
 \end{enumerate}
 
 % -----------------------------------------------------------
-\subsection{Testing}
+\subsection{Testing and Validation}
 % -----------------------------------------------------------
 
-\subsubsection{Types of Tests Conducted}
+\subsubsection{Test Plan Overview}
 
 \begin{table}[H]
 \centering
@@ -903,21 +992,168 @@ Functional Testing & End-to-end & Multi-client chat: messages sent by one client
 \addlinespace
 Security Testing & Cryptographic correctness & Tampered ciphertext raises exceptions; wrong passwords are rejected; duplicate logins are blocked. \\
 \addlinespace
-GUI Testing & User interface & Login/Register flow, message send/receive, hash computation, AES encrypt/decrypt tool. \\
+Dashboard Testing & Visualization & Security events are accurately logged and displayed for every operation. \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\subsubsection{Sample Test Scenarios}
+\subsubsection{Test Cases}
 
-\begin{enumerate}
-    \item \textbf{AES Round-Trip:} Encrypt a plaintext message, then decrypt the result; verify the recovered plaintext matches the original.
-    \item \textbf{Tamper Detection:} Flip a bit in the ciphertext and attempt decryption; verify that a \texttt{ValueError} is raised due to tag mismatch.
-    \item \textbf{RSA Key Exchange:} Generate a key pair, encrypt a 16-byte AES key with the public key, decrypt with the private key, and verify equality.
-    \item \textbf{Password Salting:} Register two users with the same password; verify that the stored hashes differ (because the salts differ).
-    \item \textbf{Duplicate Login Prevention:} Log in as a user, then attempt a second login with the same username from a different client; verify the server returns \texttt{DUP}.
-    \item \textbf{Multi-Client Broadcast:} Connect three clients, send a message from one, and verify that the other two receive it correctly decrypted.
-\end{enumerate}
+% ── Helper command: \tcfigure{caption}{gui-image-path}{dashboard-image-path} ──
+\newcommand{\tcfigure}[3]{%
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{#2}
+\subcaption{GUI Action}
+\vspace{0.5em}
+\includegraphics[width=0.85\textwidth]{#3}
+\subcaption{Security Dashboard}
+\caption{#1}
+\end{figure}
+}
+
+% ── TC1 ──
+\paragraph{TC-1: User Registration.}
+\begin{itemize}
+    \item \textbf{Description:} Register a new user and verify credentials are stored with salted SHA-256 hash in \texttt{users.json}.
+    \item \textbf{Steps:} Launch server and GUI $\to$ Enter username/password $\to$ Click Register.
+    \item \textbf{Expected:} Authentication succeeds, user redirected to main interface. Dashboard shows Handshake Steps 1--4 and \texttt{AUTH-OK} event.
+\end{itemize}
+\tcfigure{TC-1: User registration with handshake visualization}
+    {images/register.png}%       ← GUI: Registration screen
+    {images/register_handshake.png}% ← Dashboard: Handshake Steps 1--4 + AUTH-OK
+
+% ── TC2 ──
+\paragraph{TC-2: User Login with Correct Credentials.}
+\begin{itemize}
+    \item \textbf{Description:} Login with an existing user's correct credentials.
+    \item \textbf{Steps:} Launch GUI $\to$ Enter existing username/password $\to$ Click Login.
+    \item \textbf{Expected:} Login succeeds. Dashboard Handshake tab shows all 4 steps. Session Info tab shows cipher suite \texttt{AES-128-EAX + RSA-2048-OAEP + SHA-256}. A \textit{different} AES session key is generated compared to previous sessions.
+\end{itemize}
+\tcfigure{TC-2: Successful login with session info}
+    {images/register.png}%       ← GUI: Login screen
+    {images/login_handshake.png}% ← Dashboard: Session Info tab
+
+% ── TC3 ──
+\paragraph{TC-3: Login with Wrong Password.}
+\begin{itemize}
+    \item \textbf{Description:} Attempt login with an incorrect password.
+    \item \textbf{Steps:} Enter existing username with wrong password $\to$ Click Login.
+    \item \textbf{Expected:} Error dialog ``Incorrect username or password.'' with security log showing \texttt{HANDSHAKE Step 1} and \texttt{AUTH-REJECT}. No ``Unknown left'' broadcast to other clients.
+\end{itemize}
+\tcfigure{TC-3: Failed login attempt}
+    {images/failed_login.png}%       ← GUI: Error dialog
+    {images/failed_login_output.png}% ← Dashboard: AUTH-REJECT event
+
+% ── TC4 ──
+\paragraph{TC-4: Duplicate Login Prevention.}
+\begin{itemize}
+    \item \textbf{Description:} Attempt to login with a username that is already connected.
+    \item \textbf{Steps:} Login as ``alice'' on Client~1 $\to$ Attempt login as ``alice'' on Client~2.
+    \item \textbf{Expected:} Client~2 receives ``User is already logged in from another session.'' error.
+\end{itemize}
+\tcfigure{TC-4: Duplicate session prevention}
+    {images/dupe_login.png}%       ← GUI: Duplicate login error
+    {images/dupe_login_output.png}% ← Dashboard: DUP rejection event
+
+% ── TC5 ──
+\paragraph{TC-5: Encrypted Messaging (AES-EAX).}
+\begin{itemize}
+    \item \textbf{Description:} Send a chat message and verify AES encryption details in the dashboard.
+    \item \textbf{Steps:} Login $\to$ Send ``hi'' (2 bytes) $\to$ Open Security Dashboard $\to$ Crypto Log tab.
+    \item \textbf{Expected:} \texttt{AES-ENC} event shows: plaintext 2 bytes $\to$ output 34 bytes. Wire format: \texttt{[Nonce 16B] + [Tag 16B] + [Ciphertext 2B]}. Each message has a unique random nonce.
+\end{itemize}
+\tcfigure{TC-5: Message encryption logged in dashboard}
+    {images/encrypt_message.png}%       ← GUI: Sending message
+    {images/encrypt_message_output.png}% ← Dashboard: AES-ENC event in Crypto Log
+
+% ── TC6 ──
+\paragraph{TC-6: Message Reception and Decryption.}
+\begin{itemize}
+    \item \textbf{Description:} Receive a message from another client and verify decryption + tag verification.
+    \item \textbf{Steps:} Client~A sends a message $\to$ Client~B receives it $\to$ Check Client~B's Crypto Log.
+    \item \textbf{Expected:} \texttt{AES-DEC} event shows: tag\_verified = ``PASSED -- Integrity confirmed''. Message appears correctly in chat.
+\end{itemize}
+\tcfigure{TC-6: Message decryption with integrity verification}
+    {images/send_msg.png}%       ← GUI: Received message in chat
+    {images/send_msg_output.png}% ← Dashboard: AES-DEC tag verified
+
+% ── TC7 ──
+\paragraph{TC-7: SHA-256 Hash Computation.}
+\begin{itemize}
+    \item \textbf{Description:} Use the Crypto Tools SHA-256 verifier to compute a digest.
+    \item \textbf{Steps:} Navigate to Crypto Tools $\to$ Type text $\to$ Click ``Compute Digest'' $\to$ Check Crypto Log.
+    \item \textbf{Expected:} Hash result displayed (64 hex chars). \texttt{SHA-256} event logged with input size, full digest, and digest size (256 bits).
+\end{itemize}
+\tcfigure{TC-7: SHA-256 integrity verification}
+    {images/SHA.png}%       ← GUI: Crypto Tools hash result
+    {images/SHA_output.png}% ← Dashboard: SHA-256 event logged
+
+% ── TC8 ──
+\paragraph{TC-8: Manual AES Encrypt/Decrypt Round-Trip.}
+\begin{itemize}
+    \item \textbf{Description:} Use the Crypto Tools AES tool to encrypt then decrypt text.
+    \item \textbf{Steps:} Type text $\to$ Click Encrypt $\to$ Observe hex output $\to$ Click Decrypt $\to$ Verify original text recovered.
+    \item \textbf{Expected:} Round-trip succeeds. Crypto Log shows matching \texttt{AES-ENC} and \texttt{AES-DEC} events with identical nonce and tag. Different nonce from chat encryption (proving fresh nonces).
+\end{itemize}
+\tcfigure{TC-8: AES round-trip via Crypto Tools}
+    {images/AES.png}%       ← GUI: AES encrypt/decrypt tool
+    {images/AES_output.png}% ← Dashboard: AES-ENC + AES-DEC events
+
+% ── TC9 ──
+\paragraph{TC-9: RSA Key Exchange Verification.}
+\begin{itemize}
+    \item \textbf{Description:} Verify the RSA key exchange during login is correctly logged.
+    \item \textbf{Steps:} Login $\to$ Open Dashboard $\to$ Handshake tab.
+    \item \textbf{Expected:} Step 2 shows RSA-2048 public key (450 bytes) with fingerprint. Step 4 shows RSA-OAEP encrypted AES key: 16 bytes input $\to$ 256 bytes output. \texttt{RSA-ENC} event in Crypto Log confirms PKCS1\_OAEP padding.
+\end{itemize}
+\tcfigure{TC-9: RSA key exchange in handshake timeline}
+    {images/register.png}%       ← GUI: Login screen
+    {images/RSA_output.png}% ← Dashboard: Handshake tab RSA steps
+
+% ── TC10 ──
+\paragraph{TC-10: Multi-Client Broadcast.}
+\begin{itemize}
+    \item \textbf{Description:} Verify messages are broadcast to all connected clients.
+    \item \textbf{Steps:} Connect 3 clients $\to$ Send message from Client~A $\to$ Verify Client~B and Client~C receive it.
+    \item \textbf{Expected:} Message appears in all other clients' chat. Each client's Crypto Log shows independent \texttt{AES-DEC} events (different session keys per client).
+\end{itemize}
+\tcfigure{TC-10: Multi-client broadcast}
+    {images/multi_client.png}%       ← GUI: Multi-client chat
+    {images/multi_client_output.png}% ← Dashboard: Independent AES-DEC events
+
+% ── TC11 ──
+\paragraph{TC-11: Session Key Uniqueness.}
+\begin{itemize}
+    \item \textbf{Description:} Verify that each login generates a different AES session key.
+    \item \textbf{Steps:} Login $\to$ Note session key in Session Info $\to$ Disconnect $\to$ Login again $\to$ Compare.
+    \item \textbf{Expected:} Session keys differ between sessions. Server RSA key fingerprint remains the same (persistent keypair).
+\end{itemize}
+\tcfigure{TC-11: Session key uniqueness across logins}
+    {images/register.png}%       ← GUI: Session Info comparison
+    {images/session_keys.png}% ← Dashboard: Different AES keys, same fingerprint
+
+% ── TC12 ──
+\paragraph{TC-12: Duplicate Registration Rejection.}
+\begin{itemize}
+    \item \textbf{Description:} Attempt to register with a username that already exists.
+    \item \textbf{Steps:} Register as ``alice'' $\to$ Disconnect $\to$ Attempt to Register as ``alice'' again.
+    \item \textbf{Expected:} Error dialog ``Username already exists.'' Server does not overwrite the existing credentials in \texttt{users.json}.
+\end{itemize}
+\tcfigure{TC-12: Duplicate registration rejection}
+    {images/register.png}%       ← GUI: Duplicate registration error
+    {images/dupe_reg.png}% ← Dashboard: AUTH-FAIL event
+
+% ── TC13 ──
+\paragraph{TC-13: Tamper Detection (Ciphertext Integrity).}
+\begin{itemize}
+    \item \textbf{Description:} Modify AES ciphertext and attempt decryption to verify EAX tag detects tampering.
+    \item \textbf{Steps:} In Crypto Tools, encrypt a message $\to$ Copy the hex output $\to$ Manually alter one hex character $\to$ Click Decrypt.
+    \item \textbf{Expected:} Decryption fails with error ``Failed to decrypt or altered data detected.'' This confirms the EAX authentication tag rejects tampered ciphertext, raising a \texttt{ValueError} internally.
+\end{itemize}
+\tcfigure{TC-13: EAX tamper detection}
+    {images/AES.png}%       ← GUI: Tamper detection error
+    {images/AES_error.png}% ← Dashboard: Decryption failure event
 
 \subsubsection{Phase 4 Summary}
 By the end of Phase~4, the Secure Communication Suite is a fully integrated application that:
@@ -926,7 +1162,8 @@ By the end of Phase~4, the Secure Communication Suite is a fully integrated appl
     \item Establishes secure sessions using RSA key exchange.
     \item Encrypts all communication with AES-EAX authenticated encryption.
     \item Provides SHA-256 hashing for independent data integrity verification.
-    \item Offers a modern graphical interface for user-friendly interaction.
+    \item Visualizes all cryptographic operations in real-time via the Security Dashboard.
+    \item Offers a modern graphical interface with chat bubbles and sidebar navigation.
 \end{itemize}
 
 % ===========================================================
@@ -947,18 +1184,5 @@ The Secure Communication Suite successfully demonstrates the practical applicati
 \end{itemize}
 
 The hybrid encryption approach (RSA for key transport, AES for bulk encryption) mirrors real-world protocols such as TLS, providing students with hands-on experience with industry-standard security practices.
-
-% ===========================================================
-%  REFERENCES
-% ===========================================================
-\section*{References}
-\begin{enumerate}[label={[\arabic*]}]
-    \item NIST, ``Advanced Encryption Standard (AES),'' FIPS PUB 197, 2001.
-    \item R.~Rivest, A.~Shamir, and L.~Adleman, ``A Method for Obtaining Digital Signatures and Public-Key Cryptosystems,'' \textit{Communications of the ACM}, vol.~21, no.~2, pp.~120--126, 1978.
-    \item NIST, ``Secure Hash Standard (SHS),'' FIPS PUB 180-4, 2015.
-    \item M.~Bellare, P.~Rogaway, and D.~Wagner, ``The EAX Mode of Operation,'' \textit{FSE 2004}, LNCS 3017, pp.~389--407, 2004.
-    \item PyCryptodome Documentation, \url{https://www.pycryptodome.org/}.
-    \item CustomTkinter Documentation, \url{https://customtkinter.tomschimansky.com/}.
-\end{enumerate}
 
 \end{document}
